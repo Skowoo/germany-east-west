@@ -4,7 +4,6 @@ from itertools import product
 import httpx
 import pandas as pd
 
-
 BASE_URL = (
     "https://ec.europa.eu/eurostat/api/"
     "dissemination/statistics/1.0/data"
