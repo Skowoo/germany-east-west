@@ -205,6 +205,103 @@ trend_df = (
     .median()
 )
 
+st.divider()
+
+st.subheader("Obserwacje i interpretacja")
+st.caption(
+    "Poniższe obserwacje są opisowe i zależą od wybranych filtrów. Nie wyjaśniają "
+    "przyczyn różnic ani nie stanowią testu istotności statystycznej."
+)
+
+if {"East", "West"}.issubset(trend_df["group"].unique()):
+    insight_gap_df = (
+        trend_df.pivot(index="year", columns="group", values="value")
+        .dropna(subset=["East", "West"])
+        .reset_index()
+    )
+    insight_gap_df = insight_gap_df[insight_gap_df["West"] != 0].copy()
+    insight_gap_df["gap"] = (
+        insight_gap_df["East"] / insight_gap_df["West"] - 1
+    ) * 100
+
+    if insight_gap_df.empty:
+        st.info("Brak wspólnych lat z danymi obu grup do opisania luki.")
+    else:
+        first_gap = insight_gap_df.iloc[0]
+        last_gap = insight_gap_df.iloc[-1]
+
+        if len(insight_gap_df) == 1:
+            gap_direction = (
+                "wyższą medianę ma Wschód"
+                if last_gap["gap"] > 0
+                else "wyższą medianę ma Zachód"
+                if last_gap["gap"] < 0
+                else "mediany obu grup są równe"
+            )
+            st.write(
+                f"W {int(last_gap['year'])} luka wynosi "
+                f"{format_number(last_gap['gap'], 1)}%; {gap_direction}."
+            )
+        else:
+            gap_magnitude_change = abs(last_gap["gap"]) - abs(first_gap["gap"])
+            gap_change = last_gap["gap"] - first_gap["gap"]
+            if gap_magnitude_change < 0:
+                gap_interpretation = "bezwzględna wielkość luki zmalała"
+            elif gap_magnitude_change > 0:
+                gap_interpretation = "bezwzględna wielkość luki wzrosła"
+            else:
+                gap_interpretation = "bezwzględna wielkość luki pozostała bez zmian"
+
+            gap_direction = (
+                "na końcu okresu wyższą medianę ma Wschód"
+                if last_gap["gap"] > 0
+                else "na końcu okresu wyższą medianę ma Zachód"
+                if last_gap["gap"] < 0
+                else "na końcu okresu mediany obu grup są równe"
+            )
+            sign_change = (
+                " Luka zmieniła znak."
+                if first_gap["gap"] * last_gap["gap"] < 0
+                else ""
+            )
+            st.write(
+                f"W latach {int(first_gap['year'])}–{int(last_gap['year'])} "
+                f"luka zmieniła się z {format_number(first_gap['gap'], 1)}% "
+                f"do {format_number(last_gap['gap'], 1)}% "
+                f"(zmiana o {format_number(gap_change, 1)} p.p.). "
+                f"{gap_interpretation}; {gap_direction}.{sign_change}"
+            )
+else:
+    st.info("Wybierz obie grupy, aby zobaczyć obserwację dotyczącą luki.")
+
+if filtered_df.empty:
+    st.info("Brak danych dla wybranego roku i regionów do porównania regionów.")
+elif len(filtered_df) == 1:
+    region = filtered_df.iloc[0]
+    region_name = region_names.get(region["geo"], region["geo"])
+    st.write(
+        f"W {selected_year} wybrany zestaw obejmuje jeden region: {region_name} "
+        f"({format_number(region['value'])} PPS)."
+    )
+else:
+    ranked_regions = filtered_df.sort_values("value")
+    lowest_region = ranked_regions.iloc[0]
+    highest_region = ranked_regions.iloc[-1]
+    highest_name = region_names.get(
+        highest_region["geo"],
+        highest_region["geo"],
+    )
+    lowest_name = region_names.get(
+        lowest_region["geo"],
+        lowest_region["geo"],
+    )
+    st.write(
+        f"W {selected_year} najwyższą wartość w wybranym zestawie ma "
+        f"{highest_name} ({format_number(highest_region['value'])} PPS), "
+        f"a najniższą {lowest_name} "
+        f"({format_number(lowest_region['value'])} PPS)."
+    )
+
 if trend_df.empty:
     st.info("Brak danych dla wybranych grup, regionów i zakresu lat.")
     st.stop()
@@ -244,7 +341,7 @@ if {"East", "West"}.issubset(trend_df["group"].unique()):
             line_color="#8C4B8F",
             hovertemplate="Rok: %{x}<br>Różnica: %{y:.1f}%<extra></extra>",
         )
-        st.plotly_chart(gap_fig, use_container_width=True)
+        st.plotly_chart(gap_fig, width="stretch")
 else:
     st.info("Wybierz obie grupy historyczne, aby zobaczyć lukę Wschód–Zachód.")
 
@@ -279,7 +376,7 @@ trend_fig.update_layout(
     legend_title_text="Grupa historyczna",
 )
 
-st.plotly_chart(trend_fig, use_container_width=True)
+st.plotly_chart(trend_fig, width="stretch")
 
 st.divider()
 
@@ -349,7 +446,7 @@ if not filtered_df.empty:
         }
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 st.divider()
 
@@ -462,4 +559,4 @@ heatmap_fig.update_layout(
     yaxis2={"showticklabels": False},
 )
 
-st.plotly_chart(heatmap_fig, use_container_width=True)
+st.plotly_chart(heatmap_fig, width="stretch")

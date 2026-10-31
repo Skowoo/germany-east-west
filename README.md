@@ -51,6 +51,21 @@ brakujące są pomijane. Filtr i wykres regionalny pokazują nazwy regionów
 dostarczone przez Eurostat; kod NUTS pozostaje dostępny w podpowiedzi po
 najechaniu na słupek. Jeśli dla regionu brakuje nazwy, interfejs używa kodu NUTS.
 
+## Przygotowanie danych (ETL)
+
+Dashboard realizuje prosty przepływ ETL przy uruchomieniu aplikacji:
+
+1. **Extract** — klient odpytuje API Eurostatu o roczne dane NUTS 2 dla lat
+   2000–2024, w jednostce PKB na mieszkańca PPS.
+2. **Transform** — odpowiedź JSON-stat jest dekodowana do tabeli z kodami i
+   etykietami wymiarów oraz wartościami. Aplikacja konwertuje rok i wartość na
+   typy liczbowe, przypisuje regiony do grup Wschód/Zachód, a następnie
+   uwzględnia niemieckie regiony NUTS 2, wyklucza Berlin i pomija brakujące
+   wartości.
+3. **Load** — przetworzone dane są używane w pamięci przez dashboard; wynik
+   pobrania jest buforowany przez godzinę. Aplikacja nie zapisuje danych w
+   zewnętrznej bazie ani pliku.
+
 ## Metryki
 
 - **Mediana PKB na mieszkańca grupy** — mediana wartości regionów Wschodu lub
@@ -87,17 +102,22 @@ Dashboard prowadzi od podsumowania do szczegółów:
 1. **Podsumowanie** — sekcja otwierająca dashboard. Karty metryk prezentują
    mediany grup, różnicę procentową, relację Wschód/Zachód i odniesienie do
    mediany regionów dla wybranego roku.
-2. **Luka Wschód–Zachód w czasie** — wykres procentowej różnicy median grup
+2. **Obserwacje i interpretacja** — tekst podsumowuje zmianę luki między
+   pierwszym i ostatnim wspólnym rokiem oraz wskazuje regiony z najwyższą i
+   najniższą wartością w wybranym roku. Wnioski zmieniają się wraz z filtrami;
+   mają charakter opisowy i nie wyjaśniają przyczyn różnic ani nie testują ich
+   istotności statystycznej.
+3. **Luka Wschód–Zachód w czasie** — wykres procentowej różnicy median grup
    odpowiada bezpośrednio na pytanie, czy luka maleje; poziom 0% oznacza równe
    mediany.
-3. **Poziom i zmiana w czasie** — wykres liniowy porównuje mediany PKB na
+4. **Poziom i zmiana w czasie** — wykres liniowy porównuje mediany PKB na
    mieszkańca (PPS) rok po roku, a karty pokazują łączną procentową zmianę median
    grupy pomiędzy pierwszym i ostatnim dostępnym rokiem w zakresie. Poziom na
    wykresie liniowym nie jest tempem wzrostu.
-4. **Porównanie regionów** — poziomy wykres słupkowy porządkuje regiony według
+5. **Porównanie regionów** — poziomy wykres słupkowy porządkuje regiony według
    wartości w wybranym roku i koloruje je według grupy. Dłuższy słupek oznacza
    wyższy PKB na mieszkańca w PPS.
-5. **Heatmapa region × rok** — jedna mapa pokazuje poziom PKB na mieszkańca
+6. **Heatmapa region × rok** — jedna mapa pokazuje poziom PKB na mieszkańca
    w PPS dla wybranych regionów i lat. Wąski pasek przy wierszu oznacza grupę:
    czerwony to Wschód, niebieski to Zachód. Skala niebieskiego w głównej części
    mapy służy wyłącznie do porównywania wartości PKB; ciemniejszy kolor oznacza
