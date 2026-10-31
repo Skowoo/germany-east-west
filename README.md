@@ -34,14 +34,18 @@ dochody, demografię i dostęp do usług, oraz lokalny kontekst.
 
 ## Dane i źródła
 
-Dashboard korzysta z jednego źródła:
+Dashboard korzysta z dwóch zbiorów Eurostatu:
 
 - [Eurostat — Regional gross domestic product (nama_10r_2gdp)](https://ec.europa.eu/eurostat/databrowser/view/nama_10r_2gdp/default/table?lang=en)
-- Dane są pobierane z [API Eurostat](https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/nama_10r_2gdp).
+- [Eurostat — Employment rates by NUTS 2 region (lfst_r_lfe2emprt)](https://ec.europa.eu/eurostat/databrowser/view/lfst_r_lfe2emprt/default/table?lang=en)
+- Dane są pobierane przez [API Eurostat](https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/).
 
 Pobierany jest roczny regionalny PKB na mieszkańca w standardzie siły nabywczej
-(PPS, UE-27 od 2020 r.), dla poziomu NUTS 2 i lat 2000–2024. Aplikacja nie łączy
-różnych zbiorów ani tabel.
+(PPS, UE-27 od 2020 r.) oraz roczna stopa zatrudnienia dla osób w wieku 15–64
+lata, jako odsetek populacji tej grupy wieku. Oba zbiory obejmują poziom NUTS 2
+i lata 2000–2024. Każdy zbiór jest filtrowany osobno przy użyciu tych samych
+mapowań regionów i zakresu lat; wskaźniki są wyliczane i prezentowane osobno.
+Wykresy mają odrębne skale.
 
 Kod regionu przypisywany jest do grupy według `config/regions.py`. Wschód obejmuje
 Brandenburgię, Meklemburgię-Pomorze Przednie, Drezno, Chemnitz, Lipsk,
@@ -55,15 +59,18 @@ najechaniu na słupek. Jeśli dla regionu brakuje nazwy, interfejs używa kodu N
 
 Dashboard realizuje prosty przepływ ETL przy uruchomieniu aplikacji:
 
-1. **Extract** — klient odpytuje API Eurostatu o roczne dane NUTS 2 dla lat
-   2000–2024, w jednostce PKB na mieszkańca PPS.
-2. **Transform** — odpowiedź JSON-stat jest dekodowana do tabeli z kodami i
+1. **Extract** — klient odpytuje API Eurostatu o dwa roczne zbiory NUTS 2:
+   PKB na mieszkańca w PPS oraz stopę zatrudnienia osób w wieku 15–64 lata,
+   dla lat 2000–2024.
+2. **Transform** — odpowiedzi JSON-stat są dekodowane do tabel z kodami i
    etykietami wymiarów oraz wartościami. Aplikacja konwertuje rok i wartość na
    typy liczbowe, przypisuje regiony do grup Wschód/Zachód, a następnie
    uwzględnia niemieckie regiony NUTS 2, wyklucza Berlin i pomija brakujące
-   wartości.
-3. **Load** — przetworzone dane są używane w pamięci przez dashboard; wynik
-   pobrania jest buforowany przez godzinę. Aplikacja nie zapisuje danych w
+   wartości. Te same filtry regionów i lat są stosowane niezależnie do obu
+   zbiorów; nie są one łączone w jedną tabelę.
+3. **Load** — przetworzone dane są używane w pamięci przez dashboard; każdy
+   wynik pobrania jest buforowany przez godzinę. Awaria pobrania danych o
+   zatrudnieniu nie blokuje wykresów PKB. Aplikacja nie zapisuje danych w
    zewnętrznej bazie ani pliku.
 
 ## Metryki
@@ -94,6 +101,10 @@ Dashboard realizuje prosty przepływ ETL przy uruchomieniu aplikacji:
   w danym roku i dla wybranych regionów. Wynik poniżej zera oznacza niższą
   medianę na Wschodzie; linia 0% oznacza równe mediany. Wykres wymaga danych
   obu grup w tym samym roku.
+- **Stopa zatrudnienia (%)** — mediana regionalnego odsetka zatrudnionych
+  osób w wieku 15–64 lata, osobno dla wybranej grupy i roku. Wskaźnik jest
+  filtrowany tym samym zakresem lat, grup i regionów co analizy PKB; stanowi
+  kontekst rynku pracy, a nie miarę wyjaśniającą poziom PKB.
 
 ## Struktura i strategia wizualizacji
 
@@ -104,29 +115,32 @@ Dashboard prowadzi od podsumowania do szczegółów:
    mediany regionów dla wybranego roku.
 2. **Obserwacje i interpretacja** — tekst podsumowuje zmianę luki między
    pierwszym i ostatnim wspólnym rokiem oraz wskazuje regiony z najwyższą i
-   najniższą wartością w wybranym roku. Wnioski zmieniają się wraz z filtrami;
-   mają charakter opisowy i nie wyjaśniają przyczyn różnic ani nie testują ich
-   istotności statystycznej.
-3. **Luka Wschód–Zachód w czasie** — wykres procentowej różnicy median grup
-   odpowiada bezpośrednio na pytanie, czy luka maleje; poziom 0% oznacza równe
-   mediany.
-4. **Poziom i zmiana w czasie** — wykres liniowy porównuje mediany PKB na
-   mieszkańca (PPS) rok po roku, a karty pokazują łączną procentową zmianę median
-   grupy pomiędzy pierwszym i ostatnim dostępnym rokiem w zakresie. Poziom na
-   wykresie liniowym nie jest tempem wzrostu.
+   najniższą wartością w wybranym roku. Pokazuje również różnicę median stopy
+   zatrudnienia między grupami w wybranym roku oraz zmianę tej luki w zakresie
+   lat. Wnioski zmieniają się wraz z filtrami; mają charakter opisowy i nie
+   wyjaśniają przyczyn różnic ani nie testują ich istotności statystycznej.
+3. **Luka Wschód–Zachód w czasie** — każdy punkt pokazuje względną różnicę
+   median PKB na mieszkańca `(mediana Wschodu / mediana Zachodu - 1) × 100%`
+   dla wybranych regionów i danego roku. Wartość ujemna oznacza niższą medianę
+   na Wschodzie, a 0% — równe mediany; wykres obejmuje lata z danymi obu grup.
+4. **Poziom i zmiana w czasie** — wykres liniowy pokazuje mediany regionalnego
+   PKB na mieszkańca w PPS dla wybranych grup i regionów. Karty poniżej pokazują
+   łączną procentową zmianę między pierwszym i ostatnim rokiem z danymi w
+   wybranym zakresie; nie jest to średnioroczne tempo wzrostu. Następny wykres
+   pokazuje medianę stopy zatrudnienia, czyli odsetek zatrudnionych osób w wieku
+   15–64 lata, dla tych samych filtrów. Wskaźniki mają osobne skale, a ich
+   współwystępowanie nie dowodzi związku przyczynowego.
 5. **Porównanie regionów** — poziomy wykres słupkowy porządkuje regiony według
-   wartości w wybranym roku i koloruje je według grupy. Dłuższy słupek oznacza
-   wyższy PKB na mieszkańca w PPS.
+   regionalnego PKB na mieszkańca w PPS w wybranym roku; pokazuje tylko wybrane
+   regiony z danymi. Dłuższy słupek oznacza wyższą wartość, kolor wskazuje grupę.
 6. **Heatmapa region × rok** — jedna mapa pokazuje poziom PKB na mieszkańca
-   w PPS dla wybranych regionów i lat. Wąski pasek przy wierszu oznacza grupę:
-   czerwony to Wschód, niebieski to Zachód. Skala niebieskiego w głównej części
-   mapy służy wyłącznie do porównywania wartości PKB; ciemniejszy kolor oznacza
-   wyższą wartość, a puste pole brak danych. Dokładna wartość, region i rok są
-   widoczne po najechaniu na komórkę. Etykiety liczbowe nie są wyświetlane
-   bezpośrednio, a delikatne odstępy rozdzielają komórki. Regiony są sortowane
-   malejąco według PKB w pierwszym dostępnym roku wybranego zakresu. Wykres
-   słupkowy sortuje regiony według PKB w wybranym roku, więc kolejność może się
-   różnić, gdy wybrany rok nie jest pierwszym rokiem zakresu.
+   w PPS dla wybranych regionów i lat. Wąski pasek oznacza grupę: czerwony to
+   Wschód, niebieski to Zachód. Odcień głównej mapy pokazuje wartość względem
+   skali wyznaczonej dla aktualnego wyboru; puste pole oznacza brak danych.
+   Dokładna wartość, region i rok są widoczne po najechaniu na komórkę.
+   Regiony są sortowane malejąco według PKB w pierwszym dostępnym roku zakresu;
+   wykres słupkowy sortuje je według wybranego roku, więc kolejność może się
+   różnić.
 
 Filtry w panelu bocznym pozwalają wybrać rok oraz regiony. Wykresy regionalne,
 trendy i heatmapa reagują na zakres lat, wybrane grupy historyczne i regiony.
@@ -149,6 +163,7 @@ uv sync
 uv run streamlit run src/dashboard_germany/app.py
 ```
 
-W razie błędu połączenia z Eurostatem, odpowiedzi API lub nieprawidłowego
-formatu danych aplikacja wyświetla komunikat i zatrzymuje renderowanie, zamiast
-pokazywać niekompletny dashboard.
+Jeśli pobranie danych PKB zakończy się błędem połączenia, odpowiedzi API lub
+formatu danych, aplikacja wyświetla komunikat i zatrzymuje renderowanie. Błąd
+pobrania dodatkowego zbioru o zatrudnieniu wyświetla ostrzeżenie, ale nie blokuje
+pozostałych wykresów.

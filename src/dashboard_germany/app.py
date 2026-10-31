@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from api.eurostat_client import get_gdp_data
+from api.eurostat_client import get_employment_data, get_gdp_data
 from config.regions import BERLIN, get_region_group
 from plotly.subplots import make_subplots
 
@@ -32,6 +32,11 @@ def load_data():
     return get_gdp_data()
 
 
+@st.cache_data(ttl=3600)
+def load_employment_data():
+    return get_employment_data()
+
+
 try:
     with st.spinner("Pobieranie danych Eurostatu..."):
         df = load_data()
@@ -39,6 +44,32 @@ try:
 except (httpx.HTTPError, RuntimeError, ValueError, KeyError) as error:
     st.error(f"Nie udało się pobrać danych: {error}")
     st.stop()
+
+try:
+    with st.spinner("Pobieranie danych o zatrudnieniu..."):
+        employment_df = load_employment_data()
+except (httpx.HTTPError, RuntimeError, ValueError, KeyError) as error:
+    st.warning(f"Nie udało się pobrać danych o zatrudnieniu: {error}")
+    employment_df = pd.DataFrame()
+
+if not employment_df.empty:
+    employment_df["geo"] = employment_df["geo"].fillna("").astype(str)
+    employment_df["year"] = pd.to_numeric(
+        employment_df["time"],
+        errors="coerce",
+    )
+    employment_df["value"] = pd.to_numeric(
+        employment_df["value"],
+        errors="coerce",
+    )
+    employment_df["group"] = employment_df["geo"].apply(get_region_group)
+    employment_df = employment_df[
+        employment_df["geo"].str.startswith("DE")
+        & (employment_df["geo"].str.len() == 4)
+        & (employment_df["geo"] != BERLIN)
+        & employment_df["group"].notna()
+        & employment_df["value"].notna()
+    ].copy()
 
 
 df["geo"] = df["geo"].fillna("").astype(str)
@@ -205,6 +236,21 @@ trend_df = (
     .median()
 )
 
+employment_trend_df = pd.DataFrame(columns=["year", "group", "value"])
+if not employment_df.empty:
+    employment_trend_source = employment_df[
+        employment_df["year"].between(*selected_year_range)
+        & employment_df["geo"].isin(selected_regions)
+        & employment_df["group"].isin(selected_groups)
+    ]
+    employment_trend_df = (
+        employment_trend_source.groupby(
+            ["year", "group"],
+            as_index=False,
+        )["value"]
+        .median()
+    )
+
 st.divider()
 
 st.subheader("Obserwacje i interpretacja")
@@ -302,6 +348,78 @@ else:
         f"({format_number(lowest_region['value'])} PPS)."
     )
 
+if employment_df.empty:
+    st.info("Brak dostępnych danych o zatrudnieniu do przygotowania obserwacji.")
+elif {"East", "West"}.issubset(employment_trend_df["group"].unique()):
+    employment_gap_df = (
+        employment_trend_df.pivot(
+            index="year",
+            columns="group",
+            values="value",
+        )
+        .dropna(subset=["East", "West"])
+        .reset_index()
+    )
+    selected_employment = employment_gap_df[
+        employment_gap_df["year"] == selected_year
+    ]
+
+    if selected_employment.empty:
+        st.info("Brak wspólnych danych o zatrudnieniu dla wybranego roku.")
+    else:
+        current_employment = selected_employment.iloc[0]
+        current_employment_gap = (
+            current_employment["East"] - current_employment["West"]
+        )
+        employment_direction = (
+            "wyższa jest na Wschodzie"
+            if current_employment_gap > 0
+            else "wyższa jest na Zachodzie"
+            if current_employment_gap < 0
+            else "mediany obu grup są równe"
+        )
+        st.write(
+            f"W {selected_year} mediana stopy zatrudnienia (wiek 15–64 lata) "
+            f"wynosi {format_number(current_employment['East'], 1)}% na Wschodzie "
+            f"i {format_number(current_employment['West'], 1)}% na Zachodzie "
+            f"(różnica {format_number(current_employment_gap, 1)} p.p.; "
+            f"{employment_direction})."
+        )
+
+        if len(employment_gap_df) > 1:
+            first_employment = employment_gap_df.iloc[0]
+            last_employment = employment_gap_df.iloc[-1]
+            first_employment_gap = (
+                first_employment["East"] - first_employment["West"]
+            )
+            last_employment_gap = (
+                last_employment["East"] - last_employment["West"]
+            )
+            employment_gap_change = (
+                abs(last_employment_gap) - abs(first_employment_gap)
+            )
+            if employment_gap_change < 0:
+                employment_gap_trend = "bezwzględna różnica zmalała"
+            elif employment_gap_change > 0:
+                employment_gap_trend = "bezwzględna różnica wzrosła"
+            else:
+                employment_gap_trend = (
+                    "bezwzględna różnica pozostała bez zmian"
+                )
+            st.write(
+                f"W latach {int(first_employment['year'])}–"
+                f"{int(last_employment['year'])} różnica zmieniła się z "
+                f"{format_number(first_employment_gap, 1)} p.p. do "
+                f"{format_number(last_employment_gap, 1)} p.p.; "
+                f"{employment_gap_trend}."
+            )
+elif len(selected_groups) < 2:
+    st.info(
+        "Wybierz obie grupy, aby zobaczyć obserwację o różnicy zatrudnienia."
+    )
+else:
+    st.info("Brak wspólnych danych o zatrudnieniu dla obu grup.")
+
 if trend_df.empty:
     st.info("Brak danych dla wybranych grup, regionów i zakresu lat.")
     st.stop()
@@ -310,8 +428,10 @@ st.divider()
 
 st.subheader("Luka Wschód–Zachód w czasie")
 st.caption(
-    "Zmiana procentowa mediany Wschodu względem mediany Zachodu w każdym roku. "
-    "Wartość poniżej 0% oznacza niższą medianę na Wschodzie."
+    "Każdy punkt pokazuje względną różnicę median PKB na mieszkańca "
+    "(mediana Wschodu / mediana Zachodu − 1) × 100% w danym roku, dla "
+    "wybranych regionów. Wartość ujemna oznacza niższą medianę na Wschodzie, "
+    "a 0% — równe mediany. Wykres obejmuje tylko lata z danymi obu grup."
 )
 
 if {"East", "West"}.issubset(trend_df["group"].unique()):
@@ -351,8 +471,9 @@ trend_df["group_name"] = trend_df["group"].map(group_names)
 
 st.subheader("Poziom PKB na mieszkańca w czasie")
 st.caption(
-    "Porównaj poziom mediany między grupami. Wartość pokazuje poziom PKB, "
-    "nie tempo wzrostu."
+    "Każda linia przedstawia medianę regionalnego PKB na mieszkańca w PPS "
+    "dla grupy historycznej w danym roku, obliczoną dla wybranych regionów. "
+    "Wykres pokazuje poziom PKB, a nie tempo wzrostu."
 )
 
 trend_fig = px.line(
@@ -380,7 +501,11 @@ st.plotly_chart(trend_fig, width="stretch")
 
 st.divider()
 
-st.caption("Łączna zmiana mediany grupy w wybranym okresie")
+st.caption(
+    "Zmiana procentowa między medianą PKB na mieszkańca w pierwszym i ostatnim "
+    "roku z dostępnymi danymi w wybranym zakresie, liczona osobno dla każdej "
+    "grupy i wybranych regionów. To zmiana łączna, nie średnioroczne tempo wzrostu."
+)
 if selected_groups:
     growth_columns = st.columns(len(selected_groups))
 
@@ -410,11 +535,51 @@ else:
 
 st.divider()
 
+st.subheader("Stopa zatrudnienia w czasie")
+st.caption(
+    "Każda linia przedstawia medianę regionalnej stopy zatrudnienia — odsetek "
+    "zatrudnionych wśród osób w wieku 15–64 lata — dla grupy historycznej "
+    "w danym roku i wybranych regionów. Wartości są podane w procentach. "
+    "Współwystępowanie trendów z PKB nie wskazuje związku przyczynowego."
+)
+
+if employment_df.empty:
+    st.info("Dane o zatrudnieniu są obecnie niedostępne.")
+elif employment_trend_df.empty:
+    st.info("Brak danych o zatrudnieniu dla wybranych filtrów.")
+else:
+    employment_trend_df["group_name"] = employment_trend_df[
+        "group"
+    ].map(group_names)
+    employment_fig = px.line(
+        employment_trend_df,
+        x="year",
+        y="value",
+        color="group_name",
+        markers=True,
+        color_discrete_map={
+            "Wschód": "#D96B6B",
+            "Zachód": "#5B8DB8",
+        },
+        labels={
+            "value": "Stopa zatrudnienia (%)",
+            "year": "Rok",
+            "group_name": "Grupa historyczna",
+        },
+    )
+    employment_fig.update_layout(
+        legend_title_text="Grupa historyczna",
+    )
+    st.plotly_chart(employment_fig, width="stretch")
+
+st.divider()
+
 if not filtered_df.empty:
     st.subheader(f"PKB na mieszkańca według regionu — {selected_year}")
     st.caption(
-        "Porównaj regiony dla wybranego roku. Dłuższy słupek oznacza wyższy PKB "
-        "na mieszkańca (PPS); kolor wskazuje grupę historyczną."
+        "Każdy słupek pokazuje PKB na mieszkańca w PPS dla regionu w wybranym "
+        "roku. Dłuższy słupek oznacza wyższą wartość; kolor odróżnia grupy "
+        "historyczne. Widoczne są tylko wybrane regiony z dostępnymi danymi."
     )
 
     sorted_df = filtered_df.sort_values("value")
@@ -452,9 +617,12 @@ st.divider()
 
 st.subheader("PKB na mieszkańca w regionach w czasie")
 st.caption(
-    "Pasek przy każdym wierszu oznacza grupę: czerwony — Wschód, niebieski — "
-    "Zachód. Odcień komórki pokazuje poziom PKB na mieszkańca (PPS); puste "
-    "pole oznacza brak danych."
+    "Wiersze oznaczają wybrane regiony, kolumny — lata z wybranego zakresu, "
+    "a komórki — regionalny PKB na mieszkańca w PPS. Pasek przy wierszu "
+    "oznacza grupę: czerwony — Wschód, niebieski — Zachód. Ciemniejszy odcień "
+    "oznacza wyższą wartość w skali wyznaczonej dla aktualnego wyboru; puste "
+    "pole oznacza brak danych. Kolejność regionów ustala PKB w pierwszym "
+    "dostępnym roku zakresu."
 )
 
 heatmap_source = trend_source.copy()

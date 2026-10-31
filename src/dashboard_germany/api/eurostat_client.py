@@ -142,3 +142,20 @@ def get_gdp_data() -> pd.DataFrame:
     )
 
     return jsonstat_to_dataframe(data)
+
+
+def get_employment_data() -> pd.DataFrame:
+    data = fetch_dataset(
+        "lfst_r_lfe2emprt",
+        {
+            "freq": "A",
+            "unit": "PC",
+            "sex": "T",
+            "age": "Y15-64",
+            "geoLevel": "nuts2",
+            "sinceTimePeriod": "2000",
+            "untilTimePeriod": "2024",
+        },
+    )
+
+    return jsonstat_to_dataframe(data)
